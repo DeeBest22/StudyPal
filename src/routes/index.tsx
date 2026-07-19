@@ -594,36 +594,7 @@ function Home() {
       {/* ═══════════════════════════════════════
           PRICING
           ═══════════════════════════════════════ */}
-      <section id="pricing" className="relative py-20 md:py-32 bg-background-50">
-        <div className="max-w-7xl mx-auto px-4 md:px-6 lg:px-8">
-          <motion.div initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, margin: '-100px' }} transition={{ duration: 0.6 }} className="text-center mb-16 md:mb-20">
-            <div className="inline-flex items-center px-4 py-1.5 rounded-full border border-foreground-200/40 bg-foreground-50/50 mb-6">
-              <span className="text-xs font-semibold text-foreground-600 uppercase tracking-wider">Pricing</span>
-            </div>
-            <h2 className="font-heading text-3xl md:text-5xl lg:text-6xl font-bold text-foreground-950 tracking-tight">Simple, transparent<br /><span className="text-primary-500">pricing.</span></h2>
-            <p className="mt-4 text-base text-foreground-600">Start free. Upgrade when ready. No hidden fees.</p>
-          </motion.div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-8 max-w-5xl mx-auto">
-            {plans.map((p, i) => (
-              <motion.div key={p.name} initial={{ opacity: 0, y: 40 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, margin: '-100px' }} transition={{ duration: 0.5, delay: 0.15 * i }}
-                whileHover={{ y: -6 }} className={`relative rounded-[28px] p-6 md:p-8 border transition-all duration-500 ${
-                  p.hl ? 'bg-primary-500/5 border-primary-500/30 shadow-[0_0_40px_rgba(99,102,241,0.08)]' : 'bg-white border-foreground-200/20 hover:border-foreground-300/30'
-                }`}>
-                {p.badge && <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-4 py-1 rounded-full bg-primary-500 text-white text-xs font-semibold whitespace-nowrap">{p.badge}</div>}
-                <div className="mb-6"><h3 className="text-lg font-heading font-bold text-foreground-950 mb-1">{p.name}</h3><p className="text-sm text-foreground-600">{p.desc}</p></div>
-                <div className="mb-6"><span className="text-4xl md:text-5xl font-heading font-bold text-foreground-950">{p.price}</span><span className="text-sm text-foreground-500 ml-1">{p.period}</span></div>
-                <ul className="space-y-3 mb-8">
-                  {p.features.map((f) => (<li key={f} className="flex items-start gap-2.5"><i className="ri-check-line text-primary-500 text-sm mt-0.5 flex-shrink-0"></i><span className="text-sm text-foreground-700">{f}</span></li>))}
-                </ul>
-                <button className={`w-full py-3 rounded-full text-sm font-semibold transition-all duration-300 whitespace-nowrap ${
-                  p.hl ? 'bg-primary-500 text-white hover:bg-primary-600 hover:scale-105' : 'bg-foreground-950 text-foreground-50 hover:bg-foreground-900 hover:scale-105'
-                }`}>{p.cta}</button>
-              </motion.div>
-            ))}
-          </div>
-        </div>
-      </section>
 
       {/* ═══════════════════════════════════════
           FAQ
