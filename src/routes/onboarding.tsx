@@ -27,8 +27,8 @@ export const Route = createFileRoute("/onboarding")({
 type UserType = "tertiary" | "secondary";
 type LearningMode = "voice" | "text" | "mixed";
 
-const EXAMS = ["JAMB", "WAEC", "NECO", "POST-UTME", "GCE", "NABTEB", "OTHERS"];
-const LEVELS = ["100L", "200L", "300L", "400L", "500L", "HND 1", "HND 2", "Postgrad"];
+const EXAMS = ["SAT", "ACT", "A-Levels", "IB", "IGCSE", "GCSE", "OTHER"];
+const LEVELS = ["1st Year", "2nd Year", "3rd Year", "4th Year", "5th Year", "Graduate", "Postgrad"];
 
 function SelectableCard({
   selected,
@@ -292,17 +292,17 @@ function Onboarding() {
                     selected={userType === "tertiary"}
                     onClick={() => setUserType("tertiary")}
                     icon={<GraduationCap className="h-6 w-6" />}
-                    badge="University · Polytechnic · College"
-                    heading="I'm a tertiary student"
-                    description="I have coursework, assignments, and exams at university or polytechnic. I may also be working or running a business on the side."
+                    badge="University · College"
+                    heading="I'm a college/university student"
+                    description="I have coursework, assignments, and exams at university or college. I may also be working or running a business on the side."
                   />
                   <SelectableCard
                     selected={userType === "secondary"}
                     onClick={() => setUserType("secondary")}
                     icon={<PencilLine className="h-6 w-6" />}
-                    badge="JAMB · WAEC · NECO · POST-UTME · GCE"
+                    badge="SAT · ACT · A-Levels · IB · GCSE"
                     heading="I'm preparing for an exam"
-                    description="I'm in secondary school or a graduate preparing for a major exam. I need a structured revision plan fast."
+                    description="I'm in high school or a graduate preparing for a major exam. I need a structured revision plan fast."
                   />
                 </div>
               </>
@@ -316,7 +316,7 @@ function Onboarding() {
                     <input
                       value={schoolName}
                       onChange={(e) => setSchoolName(e.target.value)}
-                      placeholder="e.g. University of Lagos, FUNAAB, Yaba Tech"
+                      placeholder="e.g. University of Toronto, Delhi University, State College"
                       className={fieldInput}
                     />
                   </Field>
@@ -532,7 +532,7 @@ function Onboarding() {
                 <p className="mt-6 font-display text-xl md:text-2xl">
                   {userType === "tertiary"
                     ? `You've got ${daysToExam ?? "—"} days. Let's make every session count.`
-                    : `JAMB/WAEC is in ${daysToExam ?? "—"} days. Students who start today score higher. Let's go.`}
+                    : `Your exam is in ${daysToExam ?? "—"} days. Students who start today score higher. Let's go.`}
                 </p>
 
                 <button

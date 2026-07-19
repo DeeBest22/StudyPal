@@ -1,11 +1,11 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import {
   Folder, FolderOpen, ChevronDown, ChevronRight,
   MoreHorizontal, Plus, Grid3X3, List,
   Settings2, FilePlus, Upload, X, Loader2,
   FolderPlus, CheckCircle2, AlertCircle,
-  Trash2, Pencil, Play, Download, MoreVertical,
+  Trash2, Pencil, Play, Download, MoreVertical, Sparkles,
 } from "lucide-react";
 import { AppShell } from "./-AppShell";
 import { supabase } from "@/lib/supabase";
@@ -138,12 +138,14 @@ function FileTypeIcon({ type, size = 72 }: { type: DocType; size?: number }) {
 function DocActionMenu({
   doc,
   onOpen,
+  onAskAI,
   onDownload,
   onRename,
   onDelete,
 }: {
   doc: Doc;
   onOpen: () => void;
+  onAskAI: () => void;
   onDownload: () => void;
   onRename: () => void;
   onDelete: () => void;
@@ -190,6 +192,15 @@ function DocActionMenu({
             <Play className="h-3.5 w-3.5 text-green-400" />
             Open
           </button>
+          {doc.url && (
+            <button
+              onClick={() => act(onAskAI)}
+              className="w-full flex items-center gap-2.5 px-3.5 py-2 text-[12.5px] text-white/80 hover:text-white hover:bg-white/10 transition"
+            >
+              <Sparkles className="h-3.5 w-3.5 text-violet-400" />
+              Ask AI
+            </button>
+          )}
           <button
             onClick={() => act(onDownload)}
             className="w-full flex items-center gap-2.5 px-3.5 py-2 text-[12.5px] text-white/80 hover:text-white hover:bg-white/10 transition"
@@ -221,10 +232,11 @@ function DocActionMenu({
 // ─── Doc Card ─────────────────────────────────────────────────────────────────
 
 function DocCard({
-  doc, onOpen, onDownload, onRename, onDelete,
+  doc, onOpen, onAskAI, onDownload, onRename, onDelete,
 }: {
   doc: Doc;
   onOpen: () => void;
+  onAskAI: () => void;
   onDownload: () => void;
   onRename: () => void;
   onDelete: () => void;
@@ -238,6 +250,7 @@ function DocCard({
         <DocActionMenu
           doc={doc}
           onOpen={onOpen}
+          onAskAI={onAskAI}
           onDownload={onDownload}
           onRename={onRename}
           onDelete={onDelete}
@@ -255,10 +268,11 @@ function DocCard({
 // ─── Doc Row ──────────────────────────────────────────────────────────────────
 
 function DocRow({
-  doc, onOpen, onDownload, onRename, onDelete,
+  doc, onOpen, onAskAI, onDownload, onRename, onDelete,
 }: {
   doc: Doc;
   onOpen: () => void;
+  onAskAI: () => void;
   onDownload: () => void;
   onRename: () => void;
   onDelete: () => void;
@@ -278,6 +292,7 @@ function DocRow({
         <DocActionMenu
           doc={doc}
           onOpen={onOpen}
+          onAskAI={onAskAI}
           onDownload={onDownload}
           onRename={onRename}
           onDelete={onDelete}
@@ -366,17 +381,25 @@ function NewFolderModal({
     setLoading(true);
     setError(null);
 
-    const newFolder: FolderNode = { id: nanoid(), name: trimmed, docs: [], children: [] };
-
-    try {
-      await supabase.from("courses").insert({
-        id: newFolder.id,
+    const { data: inserted, error: dbErr } = await supabase
+      .from("courses")
+      .insert({
         user_id: userId,
         title: trimmed,
         parent_id: parentNode?.id ?? null,
         created_at: new Date().toISOString(),
-      });
-    } catch (_) {}
+      })
+      .select("id")
+      .single();
+
+    if (dbErr) {
+      console.error("Failed to create folder:", dbErr);
+      setError(dbErr.message || "Failed to create folder.");
+      setLoading(false);
+      return;
+    }
+
+    const newFolder: FolderNode = { id: inserted.id, name: trimmed, docs: [], children: [] };
 
     onCreated(newFolder);
     onClose();
@@ -454,16 +477,17 @@ function RenameModal({
     setLoading(true);
     setError(null);
 
-    try {
-      const { error: dbErr } = await supabase
-        .from("documents")
-        .update({ name: trimmed })
-        .eq("id", doc.id)
-        .eq("user_id", userId);
+    const { error: dbErr } = await supabase
+      .from("documents")
+      .update({ name: trimmed })
+      .eq("id", doc.id)
+      .eq("user_id", userId);
 
-      if (dbErr) throw dbErr;
-    } catch (_) {
-      // If DB fails (e.g. fallback demo data), still update locally
+    if (dbErr) {
+      console.error("Failed to rename document:", dbErr);
+      setError(dbErr.message || "Failed to rename document.");
+      setLoading(false);
+      return;
     }
 
     onRenamed(doc.id, trimmed);
@@ -544,7 +568,9 @@ function DeleteModal({
 
       if (dbErr) throw dbErr;
     } catch (err: any) {
-      // Still remove locally even if DB/storage delete fails (e.g. demo data)
+      // Still remove locally even if DB/storage delete fails (e.g. demo data),
+      // but log it so real failures aren't invisible.
+      console.warn("Failed to delete document from backend:", err);
     }
 
     onDeleted(doc.id);
@@ -645,7 +671,6 @@ function UploadModal({
       const { data: { publicUrl } } = supabase.storage.from("documents").getPublicUrl(path);
 
       const docRecord = {
-        id: nanoid(),
         user_id: userId,
         name: item.file.name,
         course_name: targetFolder.name,
@@ -657,12 +682,15 @@ function UploadModal({
         created_at: new Date().toISOString(),
       };
 
-      try {
-        await supabase.from("documents").insert(docRecord);
-      } catch (_) {}
+      const { data: inserted, error: dbErr } = await supabase
+        .from("documents")
+        .insert(docRecord)
+        .select("id")
+        .single();
+      if (dbErr) throw dbErr;
 
       const doc: Doc = {
-        id: docRecord.id,
+        id: inserted.id,
         name: item.file.name,
         date: formatDate(docRecord.created_at),
         type: extToType(item.file.name),
@@ -919,6 +947,7 @@ function findNode(tree: FolderNode[], id: string): FolderNode | null {
 
 export default function CoursesPage() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [tree, setTree] = useState<FolderNode[]>([]);
   const [selected, setSelected] = useState<FolderNode | null>(null);
   const [dataLoading, setDataLoading] = useState(true);
@@ -1063,6 +1092,13 @@ export default function CoursesPage() {
   function docActions(doc: Doc) {
     return {
       onOpen: () => openDoc(doc),
+      onAskAI: () => {
+        if (!doc.url) return;
+        navigate({
+          to: "/session",
+          search: { docUrl: doc.url, docName: doc.name },
+        });
+      },
       onDownload: () => downloadDoc(doc),
       onRename: () => setRenameModal(doc),
       onDelete: () => setDeleteModal(doc),

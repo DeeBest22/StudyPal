@@ -121,6 +121,7 @@ export default function NotesPage() {
   const [notes, setNotes]           = useState<Note[]>([]);
   const [loading, setLoading]       = useState(true);
   const [saving, setSaving]         = useState(false);
+  const [saveError, setSaveError]   = useState<string | null>(null);
   const [search, setSearch]         = useState("");
   const [activeTag, setActiveTag]   = useState<NoteTag | "All">("All");
   const [editing, setEditing]       = useState<Note | null>(null);
@@ -186,6 +187,7 @@ export default function NotesPage() {
     setDraftTags([]);
     setEditing(null);
     setIsNew(true);
+    setSaveError(null);
   }
 
   function openEdit(note: Note) {
@@ -201,12 +203,14 @@ export default function NotesPage() {
   function closeEditor() {
     setEditing(null);
     setIsNew(false);
+    setSaveError(null);
   }
 
   /* ── Save (insert or update) ─────────────────────────────── */
   async function saveNote() {
     if (!user) return;
     setSaving(true);
+    setSaveError(null);
 
     const wc = draftBody.trim().split(/\s+/).filter(Boolean).length;
     const now = new Date().toISOString();
@@ -218,7 +222,7 @@ export default function NotesPage() {
         body: draftBody,
         color: draftColor,
         tags: draftTags,
-        course: draftTags[0] ?? "General",
+        course: "General",
         pinned: false,
         starred: false,
         word_count: wc,
@@ -232,7 +236,14 @@ export default function NotesPage() {
         .select("id")
         .single();
 
-      if (!error && data) {
+      if (error) {
+        console.error("Failed to create note:", error);
+        setSaveError(error.message || "Failed to create note.");
+        setSaving(false);
+        return; // keep editor open so nothing is lost
+      }
+
+      if (data) {
         const newNote: Note = {
           id: data.id,
           title: payload.title,
@@ -253,7 +264,7 @@ export default function NotesPage() {
         body: draftBody,
         color: draftColor,
         tags: draftTags,
-        course: draftTags[0] ?? editing.course,
+        course: editing.course,
         word_count: wc,
         updated_at: now,
       };
@@ -264,15 +275,20 @@ export default function NotesPage() {
         .eq("id", editing.id)
         .eq("user_id", user.id);
 
-      if (!error) {
-        setNotes((prev) =>
-          prev.map((n) =>
-            n.id === editing.id
-              ? { ...n, ...updates, wordCount: wc, updatedAt: now }
-              : n
-          )
-        );
+      if (error) {
+        console.error("Failed to update note:", error);
+        setSaveError(error.message || "Failed to update note.");
+        setSaving(false);
+        return; // keep editor open so nothing is lost
       }
+
+      setNotes((prev) =>
+        prev.map((n) =>
+          n.id === editing.id
+            ? { ...n, ...updates, wordCount: wc, updatedAt: now }
+            : n
+        )
+      );
     }
 
     setSaving(false);
@@ -548,6 +564,13 @@ export default function NotesPage() {
                   <span className="text-[11px] font-semibold text-stone-400">AI Assist</span>
                 </div>
               </div>
+
+              {/* Save error banner */}
+              {saveError && (
+                <div className="shrink-0 mx-5 mt-3 rounded-lg bg-rose-50 border border-rose-200 px-3 py-2 text-xs text-rose-700">
+                  {saveError}
+                </div>
+              )}
 
               {/* Title input */}
               <div className="px-5 pt-5 pb-3 border-b border-stone-100">

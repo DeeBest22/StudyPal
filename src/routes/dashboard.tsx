@@ -411,7 +411,7 @@ function DashboardPage() {
           <div className="flex-1 p-6 flex flex-col">
             <div className="flex items-center justify-between">
               <h3 className="text-xl font-extrabold">Study</h3>
-              <Link to="/ai-tools">
+              <Link to="/session">
                 <button className="flex items-center gap-1 rounded-lg border bg-white px-3 py-1.5 text-xs font-semibold hover:bg-sage-light transition">
                   All <ChevronDown className="h-3 w-3" />
                 </button>
@@ -419,28 +419,28 @@ function DashboardPage() {
             </div>
 
             <div className="mt-4 flex-1 grid grid-cols-2 gap-3">
-              <Link to="/ai-tools">
+              <Link to="/session">
                 <AiToolCard
                   icon={<ClipboardList className="h-5 w-5" />}
                   label="Quiz Me"
                   color="bg-coral/10 text-coral"
                 />
               </Link>
-              <Link to="/ai-tools">
+              <Link to="/session">
                 <AiToolCard
                   icon={<FlipHorizontal className="h-5 w-5" />}
                   label="Flashcards"
                   color="bg-leaf/20 text-leaf"
                 />
               </Link>
-              <Link to="/ai-tools">
+              <Link to="/session">
                 <AiToolCard
                   icon={<BookOpen className="h-5 w-5" />}
                   label="Summarise"
                   color="bg-sage text-secondary-foreground"
                 />
               </Link>
-              <Link to="/ai-tools">
+              <Link to="/session">
                 <AiToolCard
                   icon={<Mic className="h-5 w-5" />}
                   label="Voice Notes"

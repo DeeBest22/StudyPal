@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState, useRef, useEffect, type MutableRefObject } from "react";
+import { useState, useRef, useEffect } from "react";
 import {
   ArrowRight,
   ArrowUp,
@@ -21,7 +21,16 @@ import { AppShell } from "@/components/sp/AppShell";
 import { groqChat, groqStructured } from "@/lib/groq";
 import { openRouterVision } from "@/lib/openrouter.server";
 
+type SessionSearch = {
+  docUrl?: string;
+  docName?: string;
+};
+
 export const Route = createFileRoute("/session")({
+  validateSearch: (search: Record<string, unknown>): SessionSearch => ({
+    docUrl: typeof search.docUrl === "string" ? search.docUrl : undefined,
+    docName: typeof search.docName === "string" ? search.docName : undefined,
+  }),
   head: () => ({
     meta: [
       { title: "Study | StudyPal" },
@@ -58,58 +67,60 @@ type DocData = {
   imageMimeType?: string;
 };
 
-// ── TTS CONFIG ──────────────────────────────────────────────────────────────
-const TTS_PROXY = "http://localhost:3001";
-const AETHEX_TTS_NOTE = "Aethex Voice API (ElevenLabs Nigerian voices active as fallback)";
+// ── TTS — uses the browser's built-in narrator (Web Speech API). ───────────
+// No external API, no key, no proxy server. Works entirely on-device.
+type TtsState = "idle" | "playing" | "error";
 
-const AETHEX_VOICES = [
-  { id: "default",                                label: "Default Voice" },
-  { id: "8466fb57-9f6b-53ad-ba5a-9729617f761c",  label: "Kemi (NG Female)" },
-  { id: "9ef397e0-8cc3-58b3-af79-0234f95a3801",  label: "Mary (NG Female)" },
-  { id: "96b20f06-536a-55ef-82c3-4882b6547858",  label: "Tolu (NG Female)" },
-  { id: "cb4ea7ea-027b-532a-b7de-356c6887a5f3",  label: "Deborah (NG Female)" },
-  { id: "93c0d2e1-61b2-51d5-8d92-a8adfef1a4ea",  label: "Segun (NG Male)" },
-  { id: "6cdade1e-41d3-52cd-bf99-7e6822758b10",  label: "Sunday (NG Male)" },
-  { id: "5c34046a-ac9b-57d5-8c70-5a61e694be3f",  label: "Femi (NG Male)" },
-  { id: "fdf12da6-fc5c-56d3-bdc5-9f3da0b65453",  label: "Chinedu (NG Male)" },
-  { id: "37449a6f-a93c-583d-80da-d005cb0b542b",  label: "Fatima (NG Female)" },
-  { id: "83210cdc-1274-5d8b-8494-d07338ba2348",  label: "Kemi Pidgin" },
-  { id: "7096175e-5cb2-5685-975e-7e98941ed6bb",  label: "Segun Pidgin" },
-  { id: "0d109a91-8d87-5d06-93f8-5f421bcaa76a",  label: "Musa Pidgin" },
-];
-
-type TtsState = "idle" | "loading" | "playing" | "error";
-
-async function aethexSpeak(
-  text: string,
-  voiceId: string,
-  onStateChange: (s: TtsState) => void,
-  audioRef: MutableRefObject<HTMLAudioElement | null>
-): Promise<void> {
-  if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
-  onStateChange("loading");
-  try {
-    const res = await fetch(`${TTS_PROXY}/tts`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: text.slice(0, 3000), voice_id: voiceId }),
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err?.error || `TTS error (${res.status})`);
+/** Live list of narrator voices installed on this device/browser. */
+function useSystemVoices() {
+  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
+  useEffect(() => {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+    function load() {
+      const all = window.speechSynthesis.getVoices();
+      // Keep English voices front and center — this is the "normal narrator" set.
+      setVoices(all.filter((v) => v.lang.toLowerCase().startsWith("en")));
     }
-    const blob = await res.blob();
-    const objUrl = URL.createObjectURL(blob);
-    const audio = new Audio(objUrl);
-    audioRef.current = audio;
-    onStateChange("playing");
-    await audio.play();
-    audio.onended = () => { URL.revokeObjectURL(objUrl); audioRef.current = null; onStateChange("idle"); };
-    audio.onerror = () => { URL.revokeObjectURL(objUrl); audioRef.current = null; onStateChange("error"); };
-  } catch (err) {
-    console.error("[TTS]", err);
-    audioRef.current = null;
+    load();
+    window.speechSynthesis.onvoiceschanged = load;
+    return () => { window.speechSynthesis.onvoiceschanged = null; };
+  }, []);
+  return voices;
+}
+
+function pickDefaultVoice(voices: SpeechSynthesisVoice[]): SpeechSynthesisVoice | null {
+  if (voices.length === 0) return null;
+  return (
+    voices.find((v) => /Natural|Google|Microsoft/i.test(v.name)) ||
+    voices.find((v) => v.lang.startsWith("en")) ||
+    voices[0]
+  );
+}
+
+function speakText(text: string, voiceURI: string, onStateChange: (s: TtsState) => void) {
+  if (typeof window === "undefined" || !("speechSynthesis" in window)) {
     onStateChange("error");
+    return;
+  }
+  window.speechSynthesis.cancel(); // stop whatever else might be reading
+  const utterance = new SpeechSynthesisUtterance(text.slice(0, 3000));
+  const voices = window.speechSynthesis.getVoices();
+  const voice = voices.find((v) => v.voiceURI === voiceURI) || pickDefaultVoice(voices);
+  if (voice) utterance.voice = voice;
+  utterance.rate = 1;
+  utterance.pitch = 1;
+  utterance.onstart = () => onStateChange("playing");
+  utterance.onend = () => onStateChange("idle");
+  utterance.onerror = (e: any) => {
+    // "interrupted"/"canceled" just means a new read started (or Stop was pressed) — not a real error.
+    onStateChange(e?.error === "interrupted" || e?.error === "canceled" ? "idle" : "error");
+  };
+  window.speechSynthesis.speak(utterance);
+}
+
+function stopSpeaking() {
+  if (typeof window !== "undefined" && "speechSynthesis" in window) {
+    window.speechSynthesis.cancel();
   }
 }
 
@@ -223,6 +234,7 @@ function buildVisionMessage(
 }
 
 function SessionPage() {
+  const search = Route.useSearch();
   const [docData, setDocData] = useState<DocData | null>(null);
   const [tool, setTool] = useState<Tool>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -233,14 +245,35 @@ function SessionPage() {
   const [flashcardData, setFlashcardData] = useState<Flashcard[]>([]);
   const [toolLoading, setToolLoading] = useState(false);
   const [introMessage, setIntroMessage] = useState<string>("");
-  const [ttsVoice, setTtsVoice] = useState("default");
-  const ttsAudioRef = useRef<HTMLAudioElement | null>(null);
+  const [ttsVoice, setTtsVoice] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const loadedDocUrlRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [messages, isLoading, toolLoading]);
+
+  // ── Load a document handed off from the /courses page ──────────────────
+  useEffect(() => {
+    if (!search.docUrl || loadedDocUrlRef.current === search.docUrl) return;
+    loadedDocUrlRef.current = search.docUrl;
+    loadDocFromUrl(search.docUrl, search.docName || "document");
+  }, [search.docUrl]);
+
+  async function loadDocFromUrl(url: string, name: string) {
+    setIsUploading(true);
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`Could not fetch document (${res.status})`);
+      const blob = await res.blob();
+      const file = new File([blob], name, { type: blob.type });
+      await handleFileUpload(file);
+    } catch (err: any) {
+      alert("Failed to load document from Courses: " + (err.message || "Unknown error"));
+      setIsUploading(false);
+    }
+  }
 
   async function handleFileUpload(file: File) {
     if (!file) return;
@@ -431,10 +464,10 @@ function SessionPage() {
                     docData={docData} tool={tool} setTool={handleToolSelect} onRemove={handleRemoveDoc}
                     summary={summary} quizData={quizData} flashcardData={flashcardData}
                     toolLoading={toolLoading} introMessage={introMessage}
-                    ttsVoice={ttsVoice} ttsAudioRef={ttsAudioRef}
+                    ttsVoice={ttsVoice}
                   />
                 )}
-                <ChatThread messages={messages} isLoading={isLoading} ttsVoice={ttsVoice} ttsAudioRef={ttsAudioRef} />
+                <ChatThread messages={messages} isLoading={isLoading} ttsVoice={ttsVoice} />
               </>
             )}
           </div>
@@ -464,42 +497,53 @@ function UploadingState() {
 }
 
 /* ---- SPEAK BUTTON ---- */
-function SpeakButton({ text, ttsVoice, ttsAudioRef }: { text: string; ttsVoice: string; ttsAudioRef: MutableRefObject<HTMLAudioElement | null> }) {
+function SpeakButton({ text, ttsVoice }: { text: string; ttsVoice: string }) {
   const [state, setState] = useState<TtsState>("idle");
   const lastClickRef = useRef(0);
 
+  // If some other button starts reading, our own utterance gets interrupted —
+  // make sure this button's state resets to idle when that happens.
+  useEffect(() => {
+    if (state !== "playing") return;
+    function checkStillSpeaking() {
+      if (typeof window !== "undefined" && !window.speechSynthesis.speaking) {
+        setState("idle");
+      }
+    }
+    const id = setInterval(checkStillSpeaking, 300);
+    return () => clearInterval(id);
+  }, [state]);
+
   function handleClick() {
     if (state === "playing") {
-      if (ttsAudioRef.current) { ttsAudioRef.current.pause(); ttsAudioRef.current = null; }
-      setState("idle"); return;
+      stopSpeaking();
+      setState("idle");
+      return;
     }
     const now = Date.now();
-    if (now - lastClickRef.current < 2000) return;
+    if (now - lastClickRef.current < 400) return;
     lastClickRef.current = now;
-    aethexSpeak(text, ttsVoice, setState, ttsAudioRef);
+    speakText(text, ttsVoice, setState);
   }
 
   return (
     <div className="mt-2 flex items-center gap-2 flex-wrap">
-      <button onClick={handleClick} disabled={state === "loading"} title={state === "playing" ? "Stop" : "Listen with " + AETHEX_TTS_NOTE}
+      <button onClick={handleClick} title={state === "playing" ? "Stop" : "Read aloud"}
         className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold transition ${
           state === "playing" ? "border-foreground bg-foreground text-background"
-          : state === "loading" ? "border-border text-muted-foreground opacity-60 cursor-not-allowed"
           : state === "error" ? "border-destructive text-destructive hover:bg-destructive/5"
           : "border-border text-muted-foreground hover:border-foreground/40 hover:text-foreground"
         }`}>
         {state === "playing" ? (<><VolumeX className="h-3 w-3" />Stop</>)
-          : state === "loading" ? (<><span className="flex gap-0.5"><span className="h-1.5 w-1.5 rounded-full bg-current animate-bounce [animation-delay:0ms]" /><span className="h-1.5 w-1.5 rounded-full bg-current animate-bounce [animation-delay:150ms]" /><span className="h-1.5 w-1.5 rounded-full bg-current animate-bounce [animation-delay:300ms]" /></span>Loading…</>)
           : state === "error" ? (<><Volume2 className="h-3 w-3" />Retry</>)
           : (<><Volume2 className="h-3 w-3" />Listen</>)}
       </button>
-      <span className="text-[10px] text-muted-foreground/50 italic">via Aethex Voice (browser fallback active)</span>
     </div>
   );
 }
 
 /* ---- CHAT THREAD ---- */
-function ChatThread({ messages, isLoading, ttsVoice, ttsAudioRef }: { messages: Message[]; isLoading: boolean; ttsVoice: string; ttsAudioRef: MutableRefObject<HTMLAudioElement | null> }) {
+function ChatThread({ messages, isLoading, ttsVoice }: { messages: Message[]; isLoading: boolean; ttsVoice: string }) {
   return (
     <div className="space-y-6 mt-6">
       {messages.map((m, i) => (
@@ -511,7 +555,7 @@ function ChatThread({ messages, isLoading, ttsVoice, ttsAudioRef }: { messages: 
               </div>
               <div className="min-w-0 flex-1 pt-0.5">
                 <p className="text-[15px] leading-relaxed text-foreground whitespace-pre-wrap">{m.content}</p>
-                <SpeakButton text={m.content} ttsVoice={ttsVoice} ttsAudioRef={ttsAudioRef} />
+                <SpeakButton text={m.content} ttsVoice={ttsVoice} />
               </div>
             </>
           ) : (
@@ -579,10 +623,10 @@ function EmptyState({ onUpload, onSuggest }: { onUpload: () => void; onSuggest: 
 }
 
 /* ---- DOC WORKSPACE ---- */
-function DocWorkspace({ docData, tool, setTool, onRemove, summary, quizData, flashcardData, toolLoading, introMessage, ttsVoice, ttsAudioRef }: {
+function DocWorkspace({ docData, tool, setTool, onRemove, summary, quizData, flashcardData, toolLoading, introMessage, ttsVoice }: {
   docData: DocData; tool: Tool; setTool: (t: Tool) => void; onRemove: () => void;
   summary: string; quizData: QuizQuestion[]; flashcardData: Flashcard[]; toolLoading: boolean; introMessage: string;
-  ttsVoice: string; ttsAudioRef: MutableRefObject<HTMLAudioElement | null>;
+  ttsVoice: string;
 }) {
   return (
     <div className="space-y-6">
@@ -634,12 +678,12 @@ function DocWorkspace({ docData, tool, setTool, onRemove, summary, quizData, fla
             </div>
           )}
 
-          {!toolLoading && tool === "summary" && summary && <SummaryPanel summary={summary} ttsVoice={ttsVoice} ttsAudioRef={ttsAudioRef} />}
-          {!toolLoading && tool === "quiz" && quizData.length > 0 && <QuizPanel questions={quizData} ttsVoice={ttsVoice} ttsAudioRef={ttsAudioRef} />}
+          {!toolLoading && tool === "summary" && summary && <SummaryPanel summary={summary} ttsVoice={ttsVoice} />}
+          {!toolLoading && tool === "quiz" && quizData.length > 0 && <QuizPanel questions={quizData} ttsVoice={ttsVoice} />}
           {!toolLoading && tool === "quiz" && quizData.length === 0 && tool && (
             <p className="mt-5 text-sm text-muted-foreground">Could not generate quiz. Please try again.</p>
           )}
-          {!toolLoading && tool === "flashcards" && flashcardData.length > 0 && <FlashcardsPanel cards={flashcardData} ttsVoice={ttsVoice} ttsAudioRef={ttsAudioRef} />}
+          {!toolLoading && tool === "flashcards" && flashcardData.length > 0 && <FlashcardsPanel cards={flashcardData} ttsVoice={ttsVoice} />}
           {!toolLoading && tool === "flashcards" && flashcardData.length === 0 && tool && (
             <p className="mt-5 text-sm text-muted-foreground">Could not generate flashcards. Please try again.</p>
           )}
@@ -674,17 +718,17 @@ function Panel({ title, hint, children }: { title: string; hint?: string; childr
 }
 
 /* ---- SUMMARY PANEL ---- */
-function SummaryPanel({ summary, ttsVoice, ttsAudioRef }: { summary: string; ttsVoice: string; ttsAudioRef: MutableRefObject<HTMLAudioElement | null> }) {
+function SummaryPanel({ summary, ttsVoice }: { summary: string; ttsVoice: string }) {
   return (
     <Panel title="Summary" hint="Generated from your document">
       <p className="whitespace-pre-wrap text-[15px] leading-relaxed text-foreground">{summary}</p>
-      <SpeakButton text={summary} ttsVoice={ttsVoice} ttsAudioRef={ttsAudioRef} />
+      <SpeakButton text={summary} ttsVoice={ttsVoice} />
     </Panel>
   );
 }
 
 /* ---- QUIZ PANEL ---- */
-function QuizPanel({ questions, ttsVoice, ttsAudioRef }: { questions: QuizQuestion[]; ttsVoice: string; ttsAudioRef: MutableRefObject<HTMLAudioElement | null> }) {
+function QuizPanel({ questions, ttsVoice }: { questions: QuizQuestion[]; ttsVoice: string }) {
   const [current, setCurrent] = useState(0);
   const [selected, setSelected] = useState<string | null>(null);
   const [score, setScore] = useState(0);
@@ -719,12 +763,12 @@ function QuizPanel({ questions, ttsVoice, ttsAudioRef }: { questions: QuizQuesti
     );
   }
 
-  const speakText = `Question ${current + 1}: ${q.question}. Options: ${q.options.map(o => `${o.label}: ${o.text}`).join(". ")}`;
+  const speakableText = `Question ${current + 1}: ${q.question}. Options: ${q.options.map(o => `${o.label}: ${o.text}`).join(". ")}`;
 
   return (
     <Panel title="Practice quiz" hint={`Question ${current + 1} of ${questions.length}`}>
       <p className="text-[15px] font-semibold text-foreground">{q.question}</p>
-      <SpeakButton text={speakText} ttsVoice={ttsVoice} ttsAudioRef={ttsAudioRef} />
+      <SpeakButton text={speakableText} ttsVoice={ttsVoice} />
       <div className="mt-4 space-y-2">
         {q.options.map((o) => {
           const isSelected = selected === o.label;
@@ -751,7 +795,7 @@ function QuizPanel({ questions, ttsVoice, ttsAudioRef }: { questions: QuizQuesti
       {selected && q.explanation && (
         <div className="mt-3 rounded-xl border-l-2 border-coral bg-cream px-4 py-3 text-sm text-muted-foreground">
           <p><span className="font-semibold text-foreground">Explanation: </span>{q.explanation}</p>
-          <SpeakButton text={q.explanation} ttsVoice={ttsVoice} ttsAudioRef={ttsAudioRef} />
+          <SpeakButton text={q.explanation} ttsVoice={ttsVoice} />
         </div>
       )}
       <div className="mt-5 flex items-center justify-between border-t border-border pt-4">
@@ -766,7 +810,7 @@ function QuizPanel({ questions, ttsVoice, ttsAudioRef }: { questions: QuizQuesti
 }
 
 /* ---- FLASHCARDS PANEL ---- */
-function FlashcardsPanel({ cards, ttsVoice, ttsAudioRef }: { cards: Flashcard[]; ttsVoice: string; ttsAudioRef: MutableRefObject<HTMLAudioElement | null> }) {
+function FlashcardsPanel({ cards, ttsVoice }: { cards: Flashcard[]; ttsVoice: string }) {
   const [flipped, setFlipped] = useState<Set<number>>(new Set());
   function toggleFlip(i: number) {
     setFlipped((prev) => { const next = new Set(prev); if (next.has(i)) next.delete(i); else next.add(i); return next; });
@@ -793,7 +837,6 @@ function FlashcardsPanel({ cards, ttsVoice, ttsAudioRef }: { cards: Flashcard[];
             <SpeakButton
               text={flipped.has(i) ? `${c.term}: ${c.definition}` : c.term}
               ttsVoice={ttsVoice}
-              ttsAudioRef={ttsAudioRef}
             />
           </div>
         ))}
@@ -867,19 +910,10 @@ function Composer({ hasDoc, onSend, isLoading, onAttach, ttsVoice, onVoiceChange
 
   const isListening = sttState === "listening";
   const sttError = sttState === "error";
+  const systemVoices = useSystemVoices();
 
   return (
     <div className="border-t border-border bg-background/90 backdrop-blur shrink-0">
-      {/* Aethex TTS notice banner */}
-      <div className="mx-auto w-full max-w-3xl px-5 pt-2">
-        <div className="flex items-center gap-1.5 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-1.5">
-          <Volume2 className="h-3 w-3 shrink-0 text-amber-500/70" />
-          <p className="text-[10px] text-amber-600/80 dark:text-amber-400/70">
-            <span className="font-semibold">Aethex Voice API</span> — host allowlist pending. ElevenLabs Nigerian voices active as fallback.
-          </p>
-        </div>
-      </div>
-
       <div className="mx-auto w-full max-w-3xl px-5 py-3">
         <div className={`flex items-end gap-2 rounded-2xl border bg-card p-2 transition ${isListening ? "border-coral/60 ring-2 ring-coral/20" : "border-border focus-within:border-coral/40"}`}>
           <button type="button" onClick={onAttach}
@@ -919,15 +953,18 @@ function Composer({ hasDoc, onSend, isLoading, onAttach, ttsVoice, onVoiceChange
               ? <span className="text-coral font-medium animate-pulse">● Recording… tap mic to stop</span>
               : "StudyPal reads your documents privately. Responses may need verification."}
           </p>
-          <div className="flex items-center gap-1.5 shrink-0">
-            <Volume2 className="h-3 w-3 text-muted-foreground" />
-            <select value={ttsVoice} onChange={(e) => onVoiceChange(e.target.value)}
-              className="rounded-lg border border-border bg-card py-0.5 pl-2 pr-6 text-[11px] text-muted-foreground focus:outline-none focus:border-coral/40 hover:border-coral/30 transition cursor-pointer">
-              {AETHEX_VOICES.map((v) => (
-                <option key={v.id} value={v.id}>{v.label}</option>
-              ))}
-            </select>
-          </div>
+          {systemVoices.length > 0 && (
+            <div className="flex items-center gap-1.5 shrink-0">
+              <Volume2 className="h-3 w-3 text-muted-foreground" />
+              <select value={ttsVoice} onChange={(e) => onVoiceChange(e.target.value)}
+                className="rounded-lg border border-border bg-card py-0.5 pl-2 pr-6 text-[11px] text-muted-foreground focus:outline-none focus:border-coral/40 hover:border-coral/30 transition cursor-pointer">
+                <option value="">System default</option>
+                {systemVoices.map((v) => (
+                  <option key={v.voiceURI} value={v.voiceURI}>{v.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
       </div>
     </div>
